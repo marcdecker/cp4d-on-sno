@@ -13,7 +13,6 @@
 2. NFS
 - 2.1 Setup NFS service on bastion
 - 2.2 Create storage class managed-nfs-storage
-- 2.3 Test nfs storage class
 
 3. CP4D
 - 3.1 Setting up a client workstation
@@ -156,7 +155,7 @@ kubeadmin
 xDitZ-D8I2H-vCSKi-bkIqS
 ```
 
-Update your /etc/hosts file on your laptop and on the bastion, for example:
+Update your /etc/hosts file on your laptop and on the bastion (as root user), for example:
 
 ```
 192.168.252.104  console-openshift-console.apps.sno-two.example.com oauth-openshift.apps.sno-two.example.com snotwo api.sno-two.example.com
@@ -172,9 +171,98 @@ oc login -u kubeadmin -p xDitZ-D8I2H-vCSKi-bkIqS --server=https://api.sno-two.ex
 
 #### 2.1 Setup NFS service on bastion
 
+We need to organize some file storage for Openshift.
+We can simply setup an NFS service on the bastion.
+
+Be root on the bastion (you probably logged in as user admin).
+
+```
+sudo -i
+```
+
+Make directory for nfs and open it up:
+
+```
+mkdir /nfs
+chmod 777 /nfs
+```
+
+Install nfs-utils (usually already present) and start nfs service:
+
+```
+yum -y install nfs-utils
+
+systemctl enable --now nfs-server rpcbind
+
+systemctl status nfs-server
+```
+
+Update nfs config:
+
+```
+vi /etc/exports
+
+add line:
+
+/nfs *(rw,sync)
+
+exportfs -rav
+```
+
+Open up the firewall for nfs:
+
+```
+sudo firewall-cmd --add-service=nfs --permanent
+sudo firewall-cmd --add-service={nfs3,mountd,rpc-bind} --permanent 
+sudo firewall-cmd --reload 
+```
+
+Enable SELinux boolean:
+
+```
+setsebool -P nfs_export_all_rw 1
+```
 
 
 
+#### 2.2 Create storage class managed-nfs-storage
+
+Login to openshift, see for example paragrapgh 1.6.
+
+Follow the steps outlined [here](https://www.ibm.com/support/pages/how-do-i-create-storage-class-nfs-dynamic-storage-provisioning-openshift-environment).
+
+Note for step 5:
+
+```
+          env:
+            - name: PROVISIONER_NAME
+              value: k8s-sigs.io/nfs-subdir-external-provisioner
+            - name: NFS_SERVER
+              value: ip-address-of-bastion
+            - name: NFS_PATH
+              value: /nfs
+      volumes:
+        - name: nfs-client-root
+          nfs:
+            server: ip-address-of-bastion
+            path: /nfs
+```
+
+Put the ip-address of the bastion node here twice, and the nfs path in twice!
+
+After step 8 the storage class is ready, you can do the tests outlined if you wish.
+
+```
+[root@bastion-gym-lan ~]# oc get sc
+NAME                  PROVISIONER                                   RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+managed-nfs-storage   k8s-sigs.io/nfs-subdir-external-provisioner   Delete          Immediate           false                  23h
+```
+
+
+
+### 3. CP4D
+
+#### 3.1 Setting up a client workstation
 
 
 
