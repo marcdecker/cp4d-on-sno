@@ -262,8 +262,258 @@ managed-nfs-storage   k8s-sigs.io/nfs-subdir-external-provisioner   Delete      
 
 ### 3. CP4D
 
+We are doing an express installation, following the [IBM knowledge center](https://www.ibm.com/docs/en/cloud-paks/cp-data/4.5.x?topic=installing) documents. Assuming version 4.5.2.
+
+`I want to ensure that a specific version of the software is installed on my cluster.`
+
+
+
 #### 3.1 Setting up a client workstation
 
+We need an oc client, and is was already installed on the bastion.
+
+Installing the IBM Cloud Pak for Data command-line interface:
+
+```
+wget https://github.com/IBM/cpd-cli/releases/download/v11.2.0/cpd-cli-linux-EE-11.2.0.tgz -P /tmp
+
+tar -xf /tmp/cpd-cli-linux-EE-11.2.0.tgz -C /usr/local/bin/
+
+mv -f /usr/local/bin/cpd-cli-linux-EE-11.2.0-40/* /usr/local/bin
+
+cpd-cli version
+```
+
+Make sure cpd-cli is installed and running:
+
+```
+cpd-cli manage
+```
 
 
+
+#### 3.2 Setting up installation environment variables
+
+Example:
+
+```
+vi cpd_vars.sh
+
+
+#===============================================================================
+# Cloud Pak for Data installation variables
+#===============================================================================
+
+# ------------------------------------------------------------------------------
+# Cluster
+# ------------------------------------------------------------------------------
+
+export OCP_URL=https://api.sno-two.example.com:6443
+export OPENSHIFT_TYPE=self-managed
+export OCP_USERNAME=kubeadmin
+export OCP_PASSWORD=xDitZ-D8I2H-vCSKi-bkIqS
+# export OCP_TOKEN=<enter your token>
+
+
+# ------------------------------------------------------------------------------
+# Projects
+# ------------------------------------------------------------------------------
+
+export PROJECT_CPFS_OPS=ibm-common-services        
+export PROJECT_CPD_OPS=ibm-common-services
+export PROJECT_CATSRC=openshift-marketplace
+export PROJECT_CPD_INSTANCE=cpd-instance
+# export PROJECT_TETHERED=<enter the tethered project>
+
+
+# ------------------------------------------------------------------------------
+# Storage
+# ------------------------------------------------------------------------------
+
+export STG_CLASS_BLOCK=managed-nfs-storage
+export STG_CLASS_FILE=managed-nfs-storage
+
+# ------------------------------------------------------------------------------
+# IBM Entitled Registry
+# ------------------------------------------------------------------------------
+
+export IBM_ENTITLEMENT_KEY=get your own key [here](https://www.ibm.com/docs/en/cloud-paks/cp-data/4.5.x?topic=information-obtaining-your-entitlement-api-key).
+
+
+# ------------------------------------------------------------------------------
+# Private container registry
+# ------------------------------------------------------------------------------
+# Set the following variables if you mirror images to a private container registry.
+#
+# To export these variables, you must uncomment each command in this section.
+
+# export PRIVATE_REGISTRY_LOCATION=<enter the location of your private container registry>
+# export PRIVATE_REGISTRY_PUSH_USER=<enter the username of a user that can push to the registry>
+# export PRIVATE_REGISTRY_PUSH_PASSWORD=<enter the password of the user that can push to the registry>
+# export PRIVATE_REGISTRY_PULL_USER=<enter the username of a user that can pull from the registry>
+# export PRIVATE_REGISTRY_PULL_PASSWORD=<enter the password of the user that can pull from the registry>
+
+
+# ------------------------------------------------------------------------------
+# Cloud Pak for Data version
+# ------------------------------------------------------------------------------
+
+export VERSION=4.5.2
+
+
+# ------------------------------------------------------------------------------
+# Components
+# ------------------------------------------------------------------------------
+# Set the following variable if you want to install or upgrade multiple components at the same time.
+#
+# To export the variable, you must uncomment the command.
+
+# export COMPONENTS=cpfs,scheduler,cpd_platform,<component-ID>
+export COMPONENTS=cpfs,cpd_platform
+
+
+chmod 700 cpd_vars.sh
+
+source ./cpd_vars.sh
+```
+
+
+
+#### 3.3 Setting up projects (namespaces) on Red Hat OpenShift Container Platform
+
+We need two projects in Openshift:
+
+```
+echo $PROJECT_CPFS_OPS
+echo $PROJECT_CPD_INSTANCE
+
+oc new-project ${PROJECT_CPFS_OPS}
+oc new-project ${PROJECT_CPD_INSTANCE}
+```
+
+
+
+#### 3.4 Creating custom security context constraints for services
+
+```
+cpd-cli manage login-to-ocp --username=${OCP_USERNAME} --password=${OCP_PASSWORD} --server=${OCP_URL}
+
+cpd-cli manage apply-scc \
+--cpd_instance_ns=${PROJECT_CPD_INSTANCE} \
+--components=wkc
+
+verify:
+
+oc adm policy who-can use scc wkc-iis-scc \
+--namespace ${PROJECT_CPD_INSTANCE} | grep "wkc-iis-sa"
+```
+
+
+
+#### 3.5 Changing required node settings
+
+CRI-O container settings:
+
+```
+cpd-cli manage login-to-ocp \
+--username=${OCP_USERNAME} \
+--password=${OCP_PASSWORD} \
+--server=${OCP_URL}
+
+
+cpd-cli manage apply-crio \
+  --openshift-type=${OPENSHIFT_TYPE}
+```
+
+Kernel parameter settings:
+
+```
+cpd-cli manage apply-db2-kubelet \
+--openshift-type=${OPENSHIFT_TYPE}
+```
+
+
+
+#### 3.6 Updating the global image pull secret
+
+```
+cpd-cli manage add-icr-cred-to-global-pull-secret \
+${IBM_ENTITLEMENT_KEY}
+
+watch oc get nodes
+```
+
+Verify:
+
+```
+oc get secret/pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d | jq
+```
+
+
+
+#### 3.7 Installing the IBM Cloud Pak for Data platform and services
+
+Express installations.
+
+Creating OLM objects for an express installation.
+
+```
+echo $VERSION
+echo $COMPONENTS
+
+cpd-cli manage apply-olm \
+--release=${VERSION} \
+--components=${COMPONENTS}
+```
+
+```
+oc patch NamespaceScope common-service \
+-n ${PROJECT_CPFS_OPS} \
+--type=merge \
+--patch='{"spec": {"csvInjector": {"enable": true} } }'
+
+verify:
+
+cpd-cli manage get-olm-artifacts \
+--subscription_ns=${PROJECT_CPFS_OPS}
+```
+
+Installing components in an express installation
+
+Note: When you use NFS storage, both ${STG_CLASS_BLOCK} and ${STG_CLASS_FILE} point to the same storage class, typically managed-nfs-storage.
+
+```
+echo $COMPONENTS
+echo $VERSION
+echo $PROJECT_CPD_INSTANCE
+echo $STG_CLASS_BLOCK
+echo $STG_CLASS_FILE
+
+cpd-cli manage apply-cr \
+--components=${COMPONENTS} \
+--release=${VERSION} \
+--cpd_instance_ns=${PROJECT_CPD_INSTANCE} \
+--block_storage_class=${STG_CLASS_BLOCK} \
+--file_storage_class=${STG_CLASS_FILE} \
+--license_acceptance=true
+
+
+cpd-cli manage get-cr-status \
+--cpd_instance_ns=${PROJECT_CPD_INSTANCE}
+```
+
+To get the initial admin password after successfull installation:
+
+```
+oc extract secret/admin-user-details --keys=initial_admin_password --to=-
+```
+
+Get the route to Cloud Pak for Data, needed to get the url for your browser:
+
+```
+oc get route -n cpd-instance
+
+NAME   HOST/PORT                                   PATH   SERVICES        PORT                   TERMINATION            WILDCARD
+cpd    cpd-cpd-instance.apps.sno-two.example.com          ibm-nginx-svc   ibm-nginx-https-port   passthrough/Redirect   None
+```
 
