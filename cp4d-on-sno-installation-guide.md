@@ -1,5 +1,11 @@
 # Installation guide Cloud Pak for Data on a Single Node Openshift cluster
 
+Purpose: Cloud Pak for Data (CP4D) runs on an Openshift cluster which uses a lot of hardware/resources.
+This can be difficult to organize at times for PoCs, MVPs, demos, sandboxing etc.
+In order to get easier access to CP4D for mentioned purposes this document describes how to install Openshift
+on a single node (SNO) and how to install CP4D on it.
+
+
 ## Overview
 
 1. SNO
