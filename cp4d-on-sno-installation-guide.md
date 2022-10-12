@@ -486,7 +486,7 @@ cpd-cli manage get-olm-artifacts \
 
 Installing components in an express installation
 
-Note: When you use NFS storage, both ${STG_CLASS_BLOCK} and ${STG_CLASS_FILE} point to the same storage class, typically managed-nfs-storage.
+Note: When you use NFS storage, both `${STG_CLASS_BLOCK}` and `${STG_CLASS_FILE}` point to the same storage class, typically managed-nfs-storage.
 
 ```
 echo $COMPONENTS
